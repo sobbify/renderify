@@ -66,7 +66,7 @@ interface Meta {
   cloud_points?: number;
   walkable_area_m2?: number;
   qa_overall?: string;
-  splat?: { present: boolean; gaussians?: number; file?: string };
+  splat?: { present: boolean; gaussians?: number; file?: string; rotation_xyz_deg?: [number, number, number] };
 }
 
 async function loadMeta(): Promise<Meta> {
@@ -103,7 +103,9 @@ async function boot(): Promise<void> {
         alphaThreshold: SPLAT_ALPHA,
         maxScreenSpaceSplatSize: SPLAT_MAX_PX,
       });
-      await splat.load(`${BASE}/${meta.splat?.file ?? 'splat.splat'}`, nav);
+      const rotation = meta.splat?.rotation_xyz_deg?.map((degrees) => degrees * Math.PI / 180) as
+        [number, number, number] | undefined;
+      await splat.load(`${BASE}/${meta.splat?.file ?? 'splat.splat'}`, nav, rotation ?? [0, 0, 0]);
       viewer.setPointsVisible(false);                                                
       viewer.setTrajectoryVisible(false);                                                  
       viewer.setDebugVisible(false);                                                  

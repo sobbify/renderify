@@ -87,10 +87,12 @@ export class SplatLayer {
     return M;
   }
 
-  async load(url: string, nav: NavData): Promise<void> {
+  async load(url: string, nav: NavData, rotationEuler: [number, number, number] = [0, 0, 0]): Promise<void> {
     const m = SplatLayer.placementMatrix(nav);
     const position = new THREE.Vector3();
-    const rotation = new THREE.Quaternion();
+    const rotation = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(rotationEuler[0], rotationEuler[1], rotationEuler[2], 'XYZ'),
+    );
     const scale = new THREE.Vector3(1, 1, 1);
     if (m) m.decompose(position, rotation, scale);
 
