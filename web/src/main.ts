@@ -64,7 +64,7 @@ interface Meta {
   cloud_points?: number;
   walkable_area_m2?: number;
   qa_overall?: string;
-  splat?: { present: boolean; gaussians?: number };
+  splat?: { present: boolean; gaussians?: number; file?: string };
 }
 
 async function loadMeta(): Promise<Meta> {
@@ -101,7 +101,7 @@ async function boot(): Promise<void> {
         alphaThreshold: SPLAT_ALPHA,
         maxScreenSpaceSplatSize: SPLAT_MAX_PX,
       });
-      await splat.load(`${BASE}/splat.splat`, nav);
+      await splat.load(`${BASE}/${meta.splat?.file ?? 'splat.splat'}`, nav);
       viewer.setPointsVisible(false);                                                
       viewer.setTrajectoryVisible(false);                                                  
       viewer.setDebugVisible(false);                                                  

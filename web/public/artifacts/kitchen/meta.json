@@ -1,0 +1,15 @@
+{
+  "capture": "kitchen",
+  "sample": "krpano Kitchen Gaussian Splat example",
+  "source": "krpano 1.23 Gaussian Splat examples",
+  "source_url": "https://krpano.com/releases/1.23/viewer/examples/3d-gaussian-splatting/splats-examples.xml",
+  "source_asset_url": "https://krpano.com/examples/gsplats/kitchen_250.splat",
+  "cloud_points": 248038,
+  "qa_overall": "REAL SPLAT",
+  "splat": {
+    "present": true,
+    "file": "kitchen.ply",
+    "gaussians": 248038
+  },
+  "note": "Converted from the official krpano kitchen_250.splat binary into standard binary_little_endian Gaussian-Splat PLY format."
+}

@@ -108,9 +108,12 @@ export class SplatLayer {
     try {
                                                                                 
                                                                               
+      const format = url.toLowerCase().endsWith('.ply')
+        ? GaussianSplats3D.SceneFormat.Ply
+        : GaussianSplats3D.SceneFormat.Splat;
       await withTimeout(
         this.viewer.addSplatScene(blobUrl, {
-          format: GaussianSplats3D.SceneFormat.Splat,                                
+          format,
           showLoadingUI: false,
           splatAlphaRemovalThreshold: this.options.alphaThreshold,
           position: position.toArray(),
