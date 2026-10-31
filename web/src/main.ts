@@ -46,8 +46,10 @@ const canvas = document.getElementById('view') as HTMLCanvasElement;
 const minimapCanvas = document.getElementById('minimap') as HTMLCanvasElement;
 const mapWrap = document.getElementById('map-wrap') as HTMLDivElement;
 const help = document.getElementById('help') as HTMLDivElement;
+const sceneReference = document.getElementById('scene-reference');
+if (sceneReference && CAPTURE !== 'eyefultower-apartment') sceneReference.remove();
 
-                                                             
+                                                              
                                                                              
 const CLEAN = params.has('clean');
 if (CLEAN) hint.classList.add('hidden');
