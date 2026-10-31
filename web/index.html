@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#111111" />
+    <title>SOBMACHINE / ANTI-GRAVITY</title>
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <main id="app">
+      <canvas id="view" aria-label="Interactive spatial twin"></canvas>
+      <header id="hud"><div class="eyebrow">SOBMACHINE / FIELD SYSTEM 01</div><div id="title">ANTI-GRAVITY</div><div id="subtitle">BOOTING SPATIAL TWIN…</div></header>
+      <div id="status-stamp">LIVE<br /><span>LINKED SPACE</span></div>
+      <aside id="scene-reference" aria-label="Real apartment reference"><div class="panel-label">REAL FRAME / EYEFULTOWER</div><img src="./artifacts/eyefultower-apartment/apartment-frame.jpg" alt="Captured EyefulTower apartment interior" /><small>captured apartment frame · same scene as mesh</small></aside><section id="map-wrap" aria-label="Navigation map"><div class="panel-label">PLAN / NORTH UP</div><canvas id="minimap"></canvas><div id="map-legend"><span><i class="sw-free"></i>open</span><span><i class="sw-obstacle"></i>blocked</span><span><i class="sw-unknown"></i>unseen</span><span><i class="sw-path"></i>capture</span><span id="legend-route" style="display:none"><i class="sw-route"></i>route</span><span id="legend-prop" style="display:none"><i class="sw-prop"></i>placed</span></div></section>
+      <div id="help"><b>WASD</b> MOVE <b>M</b> PLAN <b>P</b> POINTS <b>SHIFT</b> SPRINT <span>CLICK TO TAKE CONTROL</span></div>
+      <div id="center-hint">ENTER THE SPACE →</div><div id="reticle" class="hidden"></div><div id="reticle-label" class="hidden"></div><div id="carry-hint" class="hidden"></div><div id="toast"></div>
+      <section id="sandbox" class="hidden" aria-label="Sandbox controls"><div class="sb-head"><span>SANDBOX <em id="sandbox-count">0 PLACED</em></span><button id="sandbox-close" title="Exit (G)" aria-label="Exit sandbox">×</button></div><div class="panel-label">OBJECTS / 01—04</div><div id="prop-palette"><button data-prop="cone"><kbd>1</kbd> CONE</button><button data-prop="barrier"><kbd>2</kbd> BARRIER</button><button data-prop="crate"><kbd>3</kbd> CRATE</button><button data-prop="sign"><kbd>4</kbd> SIGN</button></div><div id="sandbox-carry-actions" class="hidden"><button id="sandbox-place">PLACE</button><button id="sandbox-rotate">ROTATE</button><button id="sandbox-cancel">CANCEL</button></div><div id="sandbox-actions"><button id="sandbox-route">ROUTE TO END</button><button id="sandbox-clear">CLEAR</button><button id="sandbox-share">COPY LINK</button></div><div id="sandbox-hint"><b>1—4</b> add · <b>click</b> place · <b>R</b> rotate · <b>DEL</b> remove · <b>T</b> route · <b>G</b> exit</div></section>
+    </main>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

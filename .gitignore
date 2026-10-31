@@ -1,0 +1,34 @@
+# environments
+.venv/
+__pycache__/
+*.pyc
+
+# pipeline runs (heavy artifacts)
+pipeline/runs/
+capture/inbox/
+
+# web (built by vite)
+web/node_modules/
+web/dist/
+web/public/artifacts/*
+!web/public/artifacts/README.md
+!web/public/artifacts/eyefultower-apartment/
+!web/public/artifacts/eyefultower-apartment/**
+
+# kaggle tooling
+kaggle/staging/
+kaggle/out/
+kaggle/config.local.ps1
+
+# large media kept out of git (sample data under test/ is allowed)
+*.mp4
+*.mov
+!test/**/*.mp4
+
+# demo video intermediates; the final MP4 is a GitHub release asset
+docs/demo/build/
+
+# local secrets (never commit)
+kaggle.json
+.env
+*_secret*

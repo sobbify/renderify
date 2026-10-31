@@ -1,0 +1,345 @@
+"""Assemble the committed R1 sample bundle (test/<capture>) from kernel outputs.
+
+Takes the fetched outputs of the two Kaggle kernels (kaggle/out/namma_pipeline,
+kaggle/out/namma_splat) and produces a small, redistributable capture:
+
+    test/<capture>/
+        README.md            auto-written summary (sizes, provenance, how-to)
+        frames/              N evenly-spaced preview frames (subset)
+        frames_meta.json
+        sfm/                 poses.json, sfm_report.json, sparse.ply
+        depth/               scale.json, depth_report.json
+        nav/                 nav.json, nav_report.json, occupancy.png
+        capture_qa.json/.md
+        web/                 nav.json, cloud.ply (decimated), splat.splat
+                             (re-pruned), occupancy.png, meta.json
+
+Usage (repo root, venv python):
+    .venv\\Scripts\\python.exe tools\\make_sample.py
+    .venv\\Scripts\\python.exe tools\\make_sample.py --frames 16 --max-gaussians 900000 \\
+        --source-note "Source: ..."
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import sys
+import zipfile
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "pipeline"))
+
+from namma import qa  
+from namma.geometry import load_cloud  
+from namma.package import _write_ply  
+from namma.splat_convert import convert_splat  
+
+
+
+COPY_FROM_PIPELINE = [
+    ("frames_meta.json", "frames_meta.json"),
+    ("poses.json", "sfm/poses.json"),
+    ("sfm_report.json", "sfm/sfm_report.json"),
+    ("sparse.ply", "sfm/sparse.ply"),
+    ("nav.json", "nav/nav.json"),
+    ("nav_report.json", "nav/nav_report.json"),
+    ("occupancy.png", "nav/occupancy.png"),
+]
+COPY_FROM_SPLAT = [
+    ("scale.json", "depth/scale.json"),
+    ("depth_report.json", "depth/depth_report.json"),
+    ("metricize.json", "metricize.json"),
+    ("capture_qa.json", "capture_qa.json"),
+    ("capture_qa.md", "capture_qa.md"),
+    
+    
+    ("nav.json", "nav/nav.json"),
+    ("nav_report.json", "nav/nav_report.json"),
+]
+
+
+def out_dir(p: Path) -> Path:
+    """fetch_output mirrors /kaggle/working, so outputs live under out/."""
+    p = Path(p)
+    return p / "out" if (p / "out").is_dir() else p
+
+
+def copy_rel(src_root: Path, src_rel: str, dst_root: Path, dst_rel: str) -> bool:
+    src = src_root / src_rel
+    if not src.exists():
+        print(f"  skip (missing): {src_rel}")
+        return False
+    dst = dst_root / dst_rel
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dst)
+    return True
+
+
+def pick_frames(frames_zip: Path, dst: Path, count: int) -> int:
+    if not frames_zip.exists():
+        print(f"  frames.zip missing ({frames_zip}) -- no preview frames copied")
+        return 0
+    dst.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(frames_zip) as z:
+        names = sorted(n for n in z.namelist() if n.lower().endswith(".jpg"))
+        if not names:
+            return 0
+        idx = np.linspace(0, len(names) - 1, min(count, len(names))).round().astype(int)
+        picked = [names[i] for i in sorted(set(idx.tolist()))]
+        for n in picked:
+            with z.open(n) as f, open(dst / Path(n).name, "wb") as out:
+                shutil.copyfileobj(f, out)
+    return len(picked)
+
+
+def prune_splat_to_box(splat_path: Path, nav: dict, lo: np.ndarray, hi: np.ndarray,
+                       margin: float = 3.0) -> int:
+    """Drop gaussians outside the capture volume (training-frame -> nav via align).
+
+    Splatfacto keeps a few confident gaussians far outside the room (through
+    windows, past under-observed walls). They render as floating blobs and are
+    useless for a room-scale twin, so the shipped sample is cropped to the dense
+    cloud's bounds plus a metre.
+    """
+    raw = np.fromfile(splat_path, dtype=np.uint8)
+    n = raw.size // 32
+    rec = raw[: n * 32].reshape(n, 32)
+    pos = rec[:, :12].copy().view(np.float32).reshape(n, 3)
+    al = nav["align"]
+    s = float(al["scale_m_per_unit"])
+    R = np.asarray(al["R_row_major"], dtype=np.float64).reshape(3, 3)
+    o = np.asarray(al["origin"], dtype=np.float64)
+    p_nav = s * (pos.astype(np.float64) - o) @ R
+    keep = ((p_nav >= lo - margin) & (p_nav <= hi + margin)).all(axis=1)
+    splat_path.write_bytes(np.ascontiguousarray(rec[keep]).tobytes())
+    return int(keep.sum())
+
+
+def _inject_camera(pipe_out: Path, dest: Path) -> None:
+    """Ensure the bundled nav.json carries the capture lens for the viewer."""
+    tf_path = pipe_out / "transforms.json"
+    if not tf_path.exists():
+        return
+    tf = json.loads(tf_path.read_text(encoding="utf-8"))
+    if not (tf.get("fl_x") and tf.get("w") and tf.get("h")):
+        return
+    cam = {
+        "camera_model": tf.get("camera_model", "PINHOLE"),
+        "w": int(tf["w"]), "h": int(tf["h"]),
+        "fl_x": float(tf["fl_x"]),
+        "fl_y": float(tf.get("fl_y", tf["fl_x"])),
+        "cx": float(tf.get("cx", tf["w"] / 2)),
+        "cy": float(tf.get("cy", tf["h"] / 2)),
+    }
+    for rel in ("nav/nav.json", "web/nav.json"):
+        p = dest / rel
+        if not p.exists():
+            continue
+        n = json.loads(p.read_text(encoding="utf-8"))
+        n["camera"] = cam
+        p.write_text(json.dumps(n), encoding="utf-8")
+
+
+def build_web(pipe_out: Path, splat_out: Path, dest: Path,
+              max_points: int, max_gaussians: int) -> dict:
+    web_src = splat_out / "web" if (splat_out / "web").is_dir() else pipe_out / "web"
+    if not (web_src / "nav.json").exists():
+        raise SystemExit(f"no web bundle found under {pipe_out} or {splat_out}")
+    web = dest / "web"
+    web.mkdir(parents=True, exist_ok=True)
+    meta = {"web_source": str(web_src)}
+    for name in ("nav.json", "occupancy.png", "meta.json"):
+        if (web_src / name).exists():
+            shutil.copy2(web_src / name, web / name)
+    
+    if (web_src / "occupancy.png").exists():
+        (dest / "nav").mkdir(parents=True, exist_ok=True)
+        shutil.copy2(web_src / "occupancy.png", dest / "nav" / "occupancy.png")
+
+    
+    xyz, rgb = load_cloud(web_src / "cloud.ply")
+    if len(xyz) > max_points:
+        rng = np.random.default_rng(7)
+        keep = rng.choice(len(xyz), max_points, replace=False)
+        keep.sort()
+        xyz, rgb = xyz[keep], rgb[keep]
+    _write_ply(web / "cloud.ply", xyz, rgb)
+    meta["cloud_points"] = int(len(xyz))
+
+    
+    raw_ply = splat_out / "splat.ply"
+    if raw_ply.exists():
+        
+        
+        tmp_out = web / "_splat_tmp.splat"
+        rep = convert_splat(raw_ply, tmp_out, max_gaussians=max_gaussians)
+        tmp_out.replace(web / "splat.splat")
+        (web / "splat_convert_report.json").unlink(missing_ok=True)
+        meta["splat_gaussians"] = rep.gaussians_out
+        meta["splat_from"] = "re-pruned raw export"
+    elif (web_src / "splat.splat").exists():
+        shutil.copy2(web_src / "splat.splat", web / "splat.splat")
+        meta["splat_from"] = "copied from web bundle"
+
+    
+    
+    if (web / "splat.splat").exists():
+        nav_doc = json.loads((web / "nav.json").read_text(encoding="utf-8"))
+        kept = prune_splat_to_box(web / "splat.splat", nav_doc, xyz.min(0), xyz.max(0))
+        meta["splat_gaussians"] = kept
+        meta["splat_bytes"] = int((web / "splat.splat").stat().st_size)
+
+    
+    meta_path = web / "meta.json"
+    if meta_path.exists():
+        m = json.loads(meta_path.read_text(encoding="utf-8"))
+        m["cloud_points"] = int(len(xyz))
+        splat = m.setdefault("splat", {})
+        if (web / "splat.splat").exists():
+            splat["present"] = True
+            splat["bytes"] = int((web / "splat.splat").stat().st_size)
+            if "splat_gaussians" in meta:
+                splat["gaussians"] = int(meta["splat_gaussians"])
+        else:
+            splat["present"] = False
+        m["sample"] = "decimated copy of the Kaggle pipeline output"
+        m["capture"] = web.parent.name
+        meta_path.write_text(json.dumps(m, indent=2), encoding="utf-8")
+    return meta
+
+
+def _fmt_size(n: int) -> str:
+    if n < 1_000:
+        return f"{n} B"
+    return f"{n / 1e6:.2f} MB" if n >= 1_000_000 else f"{n / 1e3:.0f} KB"
+
+
+def write_readme(dest: Path, meta: dict, n_frames: int, source_note: str = "") -> None:
+    cap = dest.name
+    rows = []
+    total = 0
+    for p in sorted(dest.rglob("*")):
+        if p.is_file():
+            total += p.stat().st_size
+    for sub in ("", "frames", "sfm", "depth", "nav", "web"):
+        d = dest / sub if sub else dest
+        if not d.is_dir():
+            continue
+        for p in sorted(d.iterdir()):
+            if p.is_file():
+                rows.append((str(p.relative_to(dest)).replace("\\", "/"), p.stat().st_size))
+    table = "\n".join(f"| `{name}` | {_fmt_size(size)} |" for name, size in rows)
+    g = meta.get("splat_gaussians")
+    splat_txt = f"splat pruned to {int(g):,} gaussians" if g else "no splat in this build"
+    readme = f"""# {cap} -- sample capture
+
+Everything here was produced by the anti-gravity pipeline on Kaggle from a single
+walk-through video (no LiDAR, no depth sensor). It is small enough to
+live in git so anyone can inspect or serve it without a Kaggle account.
+
+{source_note}
+
+| file | size |
+|---|---|
+{table}
+
+Total: **{total / 1e6:.1f} MB** (cloud decimated to {meta.get('cloud_points', 0):,}
+points, {splat_txt}; preview frames: {n_frames}).
+
+## View it
+
+Stage this folder where the viewer looks for artifacts, then start the app:
+
+```powershell
+New-Item -ItemType Directory -Force ..\\..\\web\\public\\artifacts\\{cap} | Out-Null
+Copy-Item -Recurse -Force .\\* ..\\..\\web\\public\\artifacts\\{cap}\\
+cd ..\\..\\web
+npm ci
+npm run dev   # open http://127.0.0.1:5173/?capture={cap}
+```
+
+Hosted twin (same data): <https://sobmachine.github.io/anti-gravity/?capture={cap}>
+
+Drag to look, WASD/arrows to walk, M toggles the minimap, P toggles the
+point cloud behind the splat. (Internal refreshes from fresh kernel outputs:
+`web/tools/sync_artifacts.ps1` performs the same copy.)
+
+## What each piece proves
+
+- `nav/nav.json` -- the metric navigation contract: 5 cm occupancy grid,
+  floor outline, camera trajectory, and the `align` block that maps the SfM
+  frame into metres (scale source + rotation + origin).
+- `web/cloud.ply` -- the same geometry in the nav frame; open it in any
+  viewer to check that "up" is up and a metre is a metre.
+- `web/splat.splat` -- the Gaussian-splat twin exactly as the web viewer
+  loads it (32 bytes per gaussian).
+- `sfm/`, `depth/`, `capture_qa.*` -- the honest paper trail: every quality
+  number the pipeline measured, including the ones that did not pass.
+"""
+    (dest / "README.md").write_text(readme, encoding="utf-8")
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--pipe-out", type=Path, default=ROOT / "kaggle/out/namma_pipeline")
+    ap.add_argument("--splat-out", type=Path, default=ROOT / "kaggle/out/namma_splat")
+    ap.add_argument("--dest", type=Path, default=ROOT / "test/south-hall-ucb")
+    ap.add_argument("--frames", type=int, default=14)
+    ap.add_argument("--max-points", type=int, default=250_000)
+    ap.add_argument("--max-gaussians", type=int, default=1_000_000)
+    ap.add_argument("--source-note", type=str, default="",
+                    help="one line of provenance/attribution for the README")
+    args = ap.parse_args()
+
+    if (args.dest / "web" / "nav.json").exists():
+        print(f"note: {args.dest} already contains a bundle; overwriting files")
+
+    print(f"assembling sample -> {args.dest}")
+    pipe_out = out_dir(args.pipe_out)
+    splat_out = out_dir(args.splat_out)
+    for root, rels in ((pipe_out, COPY_FROM_PIPELINE),
+                       (splat_out, COPY_FROM_SPLAT)):
+        for src_rel, dst_rel in rels:
+            copy_rel(root, src_rel, args.dest, dst_rel)
+
+    n = pick_frames(pipe_out / "frames.zip", args.dest / "frames", args.frames)
+    print(f"  preview frames: {n}")
+
+    meta = build_web(pipe_out, splat_out, args.dest,
+                     args.max_points, args.max_gaussians)
+    _inject_camera(pipe_out, args.dest)
+    
+    
+    try:
+        checks = qa.run_qa(args.dest)
+        qa.write_qa(args.dest, checks)
+        passed = sum(1 for c in checks if c.status == "PASS")
+        print(f"  QA regenerated on the sample: {passed}/{len(checks)} PASS")
+        
+        order = {"SKIP": 0, "PASS": 1, "WARN": 2, "FAIL": 3}
+        overall = max(checks, key=lambda c: order.get(c.status, 0)).status
+        meta_path = args.dest / "web" / "meta.json"
+        if meta_path.exists():
+            m = json.loads(meta_path.read_text(encoding="utf-8"))
+            m["qa_overall"] = overall
+            meta_path.write_text(json.dumps(m, indent=2), encoding="utf-8")
+    except Exception as exc:  
+        print(f"  QA regeneration skipped: {exc}")
+    write_readme(args.dest, meta, n, args.source_note)
+
+    total = sum(p.stat().st_size for p in args.dest.rglob("*") if p.is_file())
+    print(f"done: {args.dest} ({total/1e6:.1f} MB)")
+    splat = args.dest / "web" / "splat.splat"
+    if splat.exists() and splat.stat().st_size > 40e6:
+        print(f"WARNING: splat.splat is {splat.stat().st_size/1e6:.1f} MB -- "
+              "too big for git; lower --max-gaussians")
+    print(json.dumps(meta, indent=2))
+
+
+if __name__ == "__main__":
+    main()

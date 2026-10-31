@@ -1,0 +1,48 @@
+# Builds the web viewer and deploys it to GitHub Pages.
+#
+# Artifacts: web/public/artifacts/* is gitignored (large pipeline outputs).
+# Every committed sample capture under test/<name>/web/ is copied into
+# web/public/artifacts/<name>/ here before the build, so the deployed viewer
+# can serve ?capture=<name> without any duplicate data in git.
+name: web-pages
+
+on:
+  push:
+    branches: [main]
+    paths: ['web/**', 'test/**/web/**', '.github/workflows/web-pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - name: Stage committed sample captures
+        working-directory: .
+        run: |
+          for d in test/*/web; do
+            [ -d "$d" ] || continue
+            name="$(basename "$(dirname "$d")")"
+            echo "staging $name"
+            mkdir -p "web/public/artifacts/$name"
+            cp -r "$d/." "web/public/artifacts/$name/"
+          done
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+      - uses: actions/deploy-pages@v4

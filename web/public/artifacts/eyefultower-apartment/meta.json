@@ -1,0 +1,24 @@
+{
+  "capture": "eyefultower-apartment",
+  "sample": "Nerfstudio documented EyefulTower / apartment",
+  "source": "Facebook Research EyefulTower dataset via Nerfstudio AWS S3 bucket",
+  "source_url": "https://github.com/facebookresearch/EyefulTower",
+  "cloud_points": 220504,
+  "mesh_bounds_nav": {
+    "min": [
+      -4.943252,
+      -5.913342,
+      -0.303755
+    ],
+    "max": [
+      2.608436,
+      4.241443,
+      3.194965
+    ]
+  },
+  "qa_overall": "REAL CAPTURE",
+  "splat": {
+    "present": false
+  },
+  "note": "Point cloud is sampled directly from the downloaded EyefulTower apartment mesh. The preview frame is a real captured apartment photograph from the same scene."
+}
