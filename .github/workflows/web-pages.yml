@@ -1,48 +1,115 @@
-# Builds the web viewer and deploys it to GitHub Pages.
-#
-# Artifacts: web/public/artifacts/* is gitignored (large pipeline outputs).
-# Every committed sample capture under test/<name>/web/ is copied into
-# web/public/artifacts/<name>/ here before the build, so the deployed viewer
-# can serve ?capture=<name> without any duplicate data in git.
+# Build the viewer, stage every committed example capture, and deploy the
+# resulting static site to GitHub Pages.
 name: web-pages
 
 on:
   push:
     branches: [main]
-    paths: ['web/**', 'test/**/web/**', '.github/workflows/web-pages.yml']
+    paths:
+      - 'web/**'
+      - 'test/**/web/**'
+      - '.github/workflows/web-pages.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
 
 jobs:
-  build-deploy:
+  build:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
+    permissions:
+      contents: read
+      pages: write
     steps:
-      - uses: actions/checkout@v4
-      - name: Stage committed sample captures
-        working-directory: .
-        run: |
-          for d in test/*/web; do
-            [ -d "$d" ] || continue
-            name="$(basename "$(dirname "$d")")"
-            echo "staging $name"
-            mkdir -p "web/public/artifacts/$name"
-            cp -r "$d/." "web/public/artifacts/$name/"
-          done
-      - uses: actions/setup-node@v4
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Pages
+        uses: actions/configure-pages@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - run: npm ci
-      - run: npm run build
-      - uses: actions/upload-pages-artifact@v3
+
+      - name: Stage committed example captures
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p web/public/artifacts
+
+          # Keep examples committed directly under web/public/artifacts and
+          # also stage pipeline-produced bundles from test/<name>/web.
+          for d in test/*/web; do
+            [ -d "$d" ] || continue
+            name="$(basename "$(dirname "$d")")"
+            echo "staging test bundle: $name"
+            mkdir -p "web/public/artifacts/$name"
+            cp -r "$d/." "web/public/artifacts/$name/"
+          done
+
+      - name: Write example manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path('web/public/artifacts')
+          examples = []
+          for directory in sorted(root.iterdir()):
+              if not directory.is_dir() or not (directory / 'nav.json').exists():
+                  continue
+              meta = {}
+              meta_path = directory / 'meta.json'
+              if meta_path.exists():
+                  try:
+                      meta = json.loads(meta_path.read_text())
+                  except json.JSONDecodeError:
+                      pass
+              examples.append({
+                  'id': directory.name,
+                  'label': directory.name.replace('-', ' ').title(),
+                  'captureUrl': f'?capture={directory.name}',
+                  'meta': meta,
+              })
+
+          (root / 'examples.json').write_text(
+              json.dumps({'examples': examples}, indent=2) + '\n'
+          )
+          print(f'published {len(examples)} example(s)')
+          PY
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build viewer
+        working-directory: web
+        run: npm run build
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
         with:
           path: web/dist
-      - uses: actions/deploy-pages@v4
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

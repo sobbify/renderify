@@ -34,6 +34,18 @@ npm run dev
 
 Open `http://127.0.0.1:5173/?capture=south-hall-ucb`. Use WASD or arrow keys to move, drag or mouse-look to turn, `M` for the plan, `P` for the point cloud, and `G` for the sandbox. `npm run build` creates a static `dist/` directory.
 
+## GitHub Pages
+
+The workflow at `.github/workflows/web-pages.yml` builds and deploys the viewer whenever `main` changes. It stages every committed bundle under `test/<capture>/web/`, keeps committed examples under `web/public/artifacts/`, and writes `artifacts/examples.json` as a machine-readable catalogue.
+
+After enabling **Settings → Pages → Source: GitHub Actions**, the default example is available at:
+
+```text
+https://<owner>.github.io/<repository>/?capture=eyefultower-apartment
+```
+
+Replace `<owner>` and `<repository>` with the GitHub repository coordinates. Any additional bundle can be opened by changing the `capture` query parameter to its directory name. Because the viewer uses relative asset paths, it works both at a repository Pages URL and at a custom domain.
+
 Useful query switches include `?t=<trajectory-index>`, `?route`, `?sandbox=1`, `?clean`, and `?scale=<0..1>`. Touch devices use a left-side walk stick and right-side look gesture.
 
 ## Pipeline rule
