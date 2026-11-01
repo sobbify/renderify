@@ -2,6 +2,10 @@
 
 **A walkable spatial twin with the polish sanded off.**
 
+## Links to the Web viewer:
+* Kitchen (3DGS): https://sobbify.github.io/renderify/?capture=kitchen
+* Apartment (Point Cloud): https://sobbify.github.io/renderify/
+  
 anti-gravity turns an ordinary indoor walkthrough into a static, linkable 3D space. The project is intentionally direct: capture a place, reconstruct its geometry, attach a navigation grid, and let somebody else enter from a browser without installing a client.
 
 This repository is now maintained and presented by **sobmachine**. The interface is a deliberate brutalist system: high contrast, square edges, loud status labels, and controls that announce what they do. No decorative image pack is required by the viewer.
